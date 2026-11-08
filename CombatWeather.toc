@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: CombatWeather
+## IconTexture: Interface\AddOns\CombatWeather\Logo
+## Notes: Automatically adjusts weather density based on combat.
+## Author: Iridreth
+## Version: 1.0
+## SavedVariables: CombatWeatherDB
+
+CombatWeather.lua
