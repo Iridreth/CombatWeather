@@ -518,7 +518,7 @@ local function RegisterOptionsCategory()
 
     description:SetText(
         "CombatWeather automatically adjusts weather density based on combat status.\n\n"
-        .. "Type /cw to open the CombatWeather settings window."
+        .. "Type /combatweather to open the CombatWeather settings window."
     )
 
     local openButton = CreateFrame(
@@ -584,7 +584,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         RegisterOptionsCategory()
 
         PrintMessage(
-            "Loaded successfully. Type /cw to open settings."
+            "Loaded successfully. Type /combatweather to open settings."
         )
 
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -605,7 +605,6 @@ end)
 
 -- Slash commands.
 SLASH_COMBATWEATHER1 = "/combatweather"
-SLASH_COMBATWEATHER2 = "/cw"
 
 SlashCmdList["COMBATWEATHER"] = function()
 
