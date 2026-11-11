@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: CombatWeather
-## IconTexture: Interface\AddOns\CombatWeather\Logo
+## IconTexture: Interface\AddOns\CombatWeather\Logo\Logo.tga
 ## Notes: Automatically adjusts weather density based on combat.
 ## Author: Iridreth
 ## Version: 1.2
