@@ -1,9 +1,9 @@
-
 local ADDON_NAME = "CombatWeather"
 
 local DEFAULTS = {
     inCombat = 0,
     outOfCombat = 3,
+    bloomInCombat = 0.0,
     chatMessages = true,
 }
 
@@ -11,10 +11,16 @@ local settings
 local panel
 local combatDropdown
 local outOfCombatDropdown
+local bloomCombatSlider
+local bloomOutOfCombatSlider
+local bloomCombatValue
+local bloomOutOfCombatValue
 local chatMessagesCheckbox
 
 local pendingInCombat = DEFAULTS.inCombat
 local pendingOutOfCombat = DEFAULTS.outOfCombat
+local pendingBloomInCombat = DEFAULTS.bloomInCombat
+local pendingBloomOutOfCombat = 1.0
 local pendingChatMessages = DEFAULTS.chatMessages
 
 -- Print normal addon messages (always enabled).
@@ -35,29 +41,72 @@ local function PrintWeatherMessage(message)
 
 end
 
--- Apply weather density.
-local function ApplyWeatherDensity()
+-- Validate bloom values.
+local function ValidateBloom(value, fallback)
+
+    value = tonumber(value)
+
+    if not value or value < 0 or value > 1 then
+        return fallback
+    end
+
+    return value
+
+end
+
+-- Round bloom values to increments of 0.2.
+local function RoundBloom(value)
+
+    return math.floor(value * 5 + 0.5) / 5
+
+end
+
+-- Apply weather density and bloom settings.
+local function ApplySettings()
 
     if not settings then
         return
     end
 
-    local density
+    local inCombat = UnitAffectingCombat("player")
 
-    if UnitAffectingCombat("player") then
-        density = settings.inCombat
+    local weatherDensity
+    local bloomValue
+
+    if inCombat then
+
+        weatherDensity = settings.inCombat
+        bloomValue = settings.bloomInCombat
+
     else
-        density = settings.outOfCombat
+
+        weatherDensity = settings.outOfCombat
+        bloomValue = settings.bloomUserMult
+
     end
 
+    -- Apply weather density.
     local currentDensity = GetCVar("weatherDensity")
 
-    if tonumber(currentDensity) ~= density then
+    if tonumber(currentDensity) ~= weatherDensity then
 
-        SetCVar("weatherDensity", density)
+        SetCVar("weatherDensity", weatherDensity)
 
         PrintWeatherMessage(
-            "Weather Density set to: " .. density
+            "Weather Density set to: " .. weatherDensity
+        )
+
+    end
+
+    -- Apply bloom.
+    local currentBloom = tonumber(GetCVar("bloomUserMult"))
+
+    if currentBloom ~= bloomValue then
+
+        SetCVar("bloomUserMult", bloomValue)
+
+        PrintWeatherMessage(
+            "Bloom set to: " .. string.format("%.1f", bloomValue)
         )
 
     end
@@ -73,6 +122,7 @@ local function InitializeSettings()
 
     settings = CombatWeatherDB
 
+    -- Weather density.
     if type(settings.inCombat) ~= "number"
         or settings.inCombat < 0
         or settings.inCombat > 3
@@ -91,14 +141,40 @@ local function InitializeSettings()
 
     end
 
+    -- Capture the original bloom setting on the first addon load.
+    -- This value is retained until the user changes the
+    -- out-of-combat bloom setting and saves their preferences.
+    if settings.bloomUserMult == nil then
+
+        settings.bloomUserMult = ValidateBloom(
+            GetCVar("bloomUserMult"),
+            1.0
+        )
+
+    else
+
+        settings.bloomUserMult = ValidateBloom(
+            settings.bloomUserMult,
+            1.0
+        )
+
+    end
+
+    -- In-combat bloom.
+    settings.bloomInCombat = ValidateBloom(
+        settings.bloomInCombat,
+        DEFAULTS.bloomInCombat
+    )
+
+    -- Chat messages.
     if type(settings.chatMessages) ~= "boolean" then
         settings.chatMessages = DEFAULTS.chatMessages
     end
 
 end
 
--- Refresh dropdown selections.
-local function RefreshDropdowns()
+-- Refresh all option controls.
+local function RefreshControls()
 
     if combatDropdown then
 
@@ -124,6 +200,30 @@ local function RefreshDropdowns()
         UIDropDownMenu_SetText(
             outOfCombatDropdown,
             tostring(pendingOutOfCombat)
+        )
+
+    end
+
+    if bloomCombatSlider then
+
+        bloomCombatSlider:SetValue(
+            pendingBloomInCombat
+        )
+
+        bloomCombatValue:SetText(
+            string.format("%.1f", pendingBloomInCombat)
+        )
+
+    end
+
+    if bloomOutOfCombatSlider then
+
+        bloomOutOfCombatSlider:SetValue(
+            pendingBloomOutOfCombat
+        )
+
+        bloomOutOfCombatValue:SetText(
+            string.format("%.1f", pendingBloomOutOfCombat)
         )
 
     end
@@ -224,6 +324,93 @@ local function CreateDensityDropdown(
 
 end
 
+-- Create a bloom slider.
+local function CreateBloomSlider(
+    parent,
+    label,
+    yOffset,
+    initialValue,
+    onValueChanged
+)
+
+    local text = parent:CreateFontString(
+        nil,
+        "ARTWORK",
+        "GameFontNormal"
+    )
+
+    text:SetPoint(
+        "TOPLEFT",
+        parent,
+        "TOPLEFT",
+        20,
+        yOffset
+    )
+
+    text:SetText(label)
+
+    local slider = CreateFrame(
+        "Slider",
+        nil,
+        parent,
+        "OptionsSliderTemplate"
+    )
+
+    slider:SetPoint(
+        "TOPLEFT",
+        text,
+        "BOTTOMLEFT",
+        0,
+        -15
+    )
+
+    slider:SetWidth(220)
+    slider:SetHeight(17)
+
+    slider:SetMinMaxValues(0, 1)
+    slider:SetValueStep(0.2)
+    slider:SetObeyStepOnDrag(true)
+
+    slider.Low:SetText("0.0")
+    slider.High:SetText("1.0")
+    slider.Text:SetText("")
+
+    slider:SetValue(initialValue)
+
+    local valueText = parent:CreateFontString(
+        nil,
+        "ARTWORK",
+        "GameFontHighlight"
+    )
+
+    valueText:SetPoint(
+        "LEFT",
+        slider,
+        "RIGHT",
+        15,
+        0
+    )
+
+    valueText:SetText(
+        string.format("%.1f", initialValue)
+    )
+
+    slider:SetScript("OnValueChanged", function(self, value)
+
+        value = RoundBloom(value)
+
+        valueText:SetText(
+            string.format("%.1f", value)
+        )
+
+        onValueChanged(value)
+
+    end)
+
+    return slider, valueText
+
+end
+
 -- Create the standalone options window.
 local function CreateOptionsPanel()
 
@@ -234,7 +421,7 @@ local function CreateOptionsPanel()
         "BackdropTemplate"
     )
 
-    panel:SetSize(360, 360)
+    panel:SetSize(380, 510)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetClampedToScreen(true)
@@ -301,7 +488,7 @@ local function CreateOptionsPanel()
     )
 
     description:SetText(
-        "Configure weather density depending on combat status."
+        "Configure weather density and bloom depending on combat status."
     )
 
     -- Close button.
@@ -320,7 +507,7 @@ local function CreateOptionsPanel()
         -2
     )
 
-    -- In-combat dropdown.
+    -- In-combat weather dropdown.
     combatDropdown = CreateDensityDropdown(
         "CombatWeatherCombatDropdown",
         panel,
@@ -334,7 +521,7 @@ local function CreateOptionsPanel()
         end
     )
 
-    -- Out-of-combat dropdown.
+    -- Out-of-combat weather dropdown.
     outOfCombatDropdown = CreateDensityDropdown(
         "CombatWeatherOutOfCombatDropdown",
         panel,
@@ -345,6 +532,32 @@ local function CreateOptionsPanel()
         end,
         function(value)
             pendingOutOfCombat = value
+        end
+    )
+
+    -- In-combat bloom slider.
+    bloomCombatSlider, bloomCombatValue = CreateBloomSlider(
+        panel,
+        "In Combat Bloom",
+        -250,
+        pendingBloomInCombat,
+        function(value)
+
+            pendingBloomInCombat = value
+
+        end
+    )
+
+    -- Out-of-combat bloom slider.
+    bloomOutOfCombatSlider, bloomOutOfCombatValue = CreateBloomSlider(
+        panel,
+        "Out of Combat Bloom",
+        -330,
+        pendingBloomOutOfCombat,
+        function(value)
+
+            pendingBloomOutOfCombat = value
+
         end
     )
 
@@ -361,7 +574,7 @@ local function CreateOptionsPanel()
         panel,
         "TOPLEFT",
         18,
-        -235
+        -415
     )
 
     chatMessagesCheckbox:SetChecked(pendingChatMessages)
@@ -386,7 +599,6 @@ local function CreateOptionsPanel()
 
         pendingChatMessages = self:GetChecked() and true or false
 
-        -- Save preference immediately.
         settings.chatMessages = pendingChatMessages
 
     end)
@@ -415,11 +627,16 @@ local function CreateOptionsPanel()
 
         pendingInCombat = DEFAULTS.inCombat
         pendingOutOfCombat = DEFAULTS.outOfCombat
+
+        pendingBloomInCombat = DEFAULTS.bloomInCombat
+
+        -- Restore the originally saved bloom preference.
+        pendingBloomOutOfCombat = settings.bloomUserMult
+
         pendingChatMessages = DEFAULTS.chatMessages
 
-        RefreshDropdowns()
+        RefreshControls()
 
-        -- Apply checkbox preference immediately.
         settings.chatMessages = pendingChatMessages
 
         PrintMessage(
@@ -452,11 +669,19 @@ local function CreateOptionsPanel()
 
         settings.inCombat = pendingInCombat
         settings.outOfCombat = pendingOutOfCombat
+
+        settings.bloomInCombat = pendingBloomInCombat
+
+        -- Save the selected out-of-combat bloom value.
+        -- This also overwrites the previously captured
+        -- bloom preference for future addon sessions.
+        settings.bloomUserMult = pendingBloomOutOfCombat
+
         settings.chatMessages = pendingChatMessages
 
         PrintMessage("Settings saved.")
 
-        ApplyWeatherDensity()
+        ApplySettings()
 
     end)
 
@@ -465,9 +690,14 @@ local function CreateOptionsPanel()
 
         pendingInCombat = settings.inCombat
         pendingOutOfCombat = settings.outOfCombat
+
+        pendingBloomInCombat = settings.bloomInCombat
+
+        pendingBloomOutOfCombat = settings.bloomUserMult
+
         pendingChatMessages = settings.chatMessages
 
-        RefreshDropdowns()
+        RefreshControls()
 
     end)
 
@@ -517,7 +747,7 @@ local function RegisterOptionsCategory()
     )
 
     description:SetText(
-        "CombatWeather automatically adjusts weather density based on combat status.\n\n"
+        "CombatWeather automatically adjusts weather density and bloom based on combat status.\n\n"
         .. "Type /combatweather to open the CombatWeather settings window."
     )
 
@@ -589,15 +819,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
 
-        ApplyWeatherDensity()
+        ApplySettings()
 
     elseif event == "PLAYER_REGEN_DISABLED" then
 
-        ApplyWeatherDensity()
+        ApplySettings()
 
     elseif event == "PLAYER_REGEN_ENABLED" then
 
-        ApplyWeatherDensity()
+        ApplySettings()
 
     end
 
