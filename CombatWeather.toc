@@ -3,7 +3,7 @@
 ## IconTexture: Interface\AddOns\CombatWeather\Logo\Logo.tga
 ## Notes: Automatically adjusts weather density based on combat.
 ## Author: Iridreth
-## Version: 1.2
+## Version: 1.3
 ## SavedVariables: CombatWeatherDB
 
 CombatWeather.lua
