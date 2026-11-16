@@ -5,6 +5,7 @@ local DEFAULTS = {
     outOfCombat = 3,
     bloomInCombat = 0.0,
     chatMessages = true,
+    disableInsideInstances = false,
 }
 
 local settings
@@ -16,34 +17,31 @@ local bloomOutOfCombatSlider
 local bloomCombatValue
 local bloomOutOfCombatValue
 local chatMessagesCheckbox
+local instanceCheckbox
 
 local pendingInCombat = DEFAULTS.inCombat
 local pendingOutOfCombat = DEFAULTS.outOfCombat
 local pendingBloomInCombat = DEFAULTS.bloomInCombat
 local pendingBloomOutOfCombat = 1.0
 local pendingChatMessages = DEFAULTS.chatMessages
+local pendingDisableInsideInstances = DEFAULTS.disableInsideInstances
 
--- Print normal addon messages (always enabled).
+local isInsideInstance = false
+
+-- Print normal addon messages.
 local function PrintMessage(message)
-
     print("|cff00ff00CombatWeather:|r " .. message)
-
 end
 
--- Print weather density messages only when enabled.
+-- Print weather messages only when enabled.
 local function PrintWeatherMessage(message)
-
     if settings and settings.chatMessages then
-
         print("|cff00ff00CombatWeather:|r " .. message)
-
     end
-
 end
 
 -- Validate bloom values.
 local function ValidateBloom(value, fallback)
-
     value = tonumber(value)
 
     if not value or value < 0 or value > 1 then
@@ -51,21 +49,104 @@ local function ValidateBloom(value, fallback)
     end
 
     return value
+end
 
+-- Validate weather density.
+local function ValidateDensity(value, fallback)
+    value = tonumber(value)
+
+    if not value or value < 0 or value > 3
+        or value ~= math.floor(value) then
+        return fallback
+    end
+
+    return value
 end
 
 -- Round bloom values to increments of 0.2.
 local function RoundBloom(value)
-
     return math.floor(value * 5 + 0.5) / 5
+end
+-- Determine whether the player is inside a supported instance.
+local function IsInsideSupportedInstance()
+    local inInstance, instanceType = IsInInstance()
 
+    if not inInstance then
+        return false
+    end
+
+    return instanceType == "party"
+        or instanceType == "raid"
+        or instanceType == "pvp"
+        or instanceType == "arena"
+end
+
+-- Restore the player's original weather settings.
+local function RestoreOriginalSettings()
+    if not settings then
+        return
+    end
+
+    local originalDensity = settings.weatherUserDensity
+    local originalBloom = settings.bloomUserMult
+
+    if originalDensity ~= nil then
+        local currentDensity = tonumber(GetCVar("weatherDensity"))
+
+        if currentDensity ~= originalDensity then
+            SetCVar("weatherDensity", originalDensity)
+
+            PrintWeatherMessage(
+                "Original weather density restored: "
+                .. originalDensity
+            )
+        end
+    end
+
+    if originalBloom ~= nil then
+        local currentBloom = tonumber(GetCVar("bloomUserMult"))
+
+        if currentBloom ~= originalBloom then
+            SetCVar("bloomUserMult", originalBloom)
+
+            PrintWeatherMessage(
+                "Original bloom restored: "
+                .. string.format("%.1f", originalBloom)
+            )
+        end
+    end
 end
 
 -- Apply weather density and bloom settings.
 local function ApplySettings()
-
     if not settings then
         return
+    end
+
+    local currentlyInsideInstance = IsInsideSupportedInstance()
+
+    -- Suspend CombatWeather inside supported instances.
+    if settings.disableInsideInstances and currentlyInsideInstance then
+
+        if not isInsideInstance then
+            isInsideInstance = true
+
+            PrintWeatherMessage(
+                "Inside instance. CombatWeather suspended."
+            )
+        end
+
+        RestoreOriginalSettings()
+        return
+    end
+
+    -- Resume CombatWeather outside instances.
+    if isInsideInstance then
+        isInsideInstance = false
+
+        PrintWeatherMessage(
+            "Outside instance. CombatWeather resumed."
+        )
     end
 
     local inCombat = UnitAffectingCombat("player")
@@ -74,90 +155,79 @@ local function ApplySettings()
     local bloomValue
 
     if inCombat then
-
         weatherDensity = settings.inCombat
         bloomValue = settings.bloomInCombat
-
     else
-
         weatherDensity = settings.outOfCombat
         bloomValue = settings.bloomUserMult
-
     end
 
     -- Apply weather density.
-    local currentDensity = GetCVar("weatherDensity")
+    local currentDensity = tonumber(GetCVar("weatherDensity"))
 
-    if tonumber(currentDensity) ~= weatherDensity then
-
+    if currentDensity ~= weatherDensity then
         SetCVar("weatherDensity", weatherDensity)
 
         PrintWeatherMessage(
             "Weather Density set to: " .. weatherDensity
         )
-
     end
 
     -- Apply bloom.
     local currentBloom = tonumber(GetCVar("bloomUserMult"))
 
     if currentBloom ~= bloomValue then
-
         SetCVar("bloomUserMult", bloomValue)
 
         PrintWeatherMessage(
             "Bloom set to: " .. string.format("%.1f", bloomValue)
         )
-
     end
-
 end
 
 -- Initialize saved settings.
 local function InitializeSettings()
-
     if type(CombatWeatherDB) ~= "table" then
         CombatWeatherDB = {}
     end
 
     settings = CombatWeatherDB
 
-    -- Weather density.
-    if type(settings.inCombat) ~= "number"
-        or settings.inCombat < 0
-        or settings.inCombat > 3
-        or settings.inCombat ~= math.floor(settings.inCombat) then
+    -- Weather density profiles.
+    settings.inCombat = ValidateDensity(
+        settings.inCombat,
+        DEFAULTS.inCombat
+    )
 
-        settings.inCombat = DEFAULTS.inCombat
+    settings.outOfCombat = ValidateDensity(
+        settings.outOfCombat,
+        DEFAULTS.outOfCombat
+    )
 
+    -- Capture original weather density on first addon load.
+    if settings.weatherUserDensity == nil then
+        settings.weatherUserDensity = ValidateDensity(
+            GetCVar("weatherDensity"),
+            DEFAULTS.outOfCombat
+        )
+    else
+        settings.weatherUserDensity = ValidateDensity(
+            settings.weatherUserDensity,
+            DEFAULTS.outOfCombat
+        )
     end
 
-    if type(settings.outOfCombat) ~= "number"
-        or settings.outOfCombat < 0
-        or settings.outOfCombat > 3
-        or settings.outOfCombat ~= math.floor(settings.outOfCombat) then
-
-        settings.outOfCombat = DEFAULTS.outOfCombat
-
-    end
-
-    -- Capture the original bloom setting on the first addon load.
-    -- This value is retained until the user changes the
-    -- out-of-combat bloom setting and saves their preferences.
+    -- Capture original bloom preference.
     if settings.bloomUserMult == nil then
-
         settings.bloomUserMult = ValidateBloom(
             GetCVar("bloomUserMult"),
             1.0
         )
-
     else
-
         settings.bloomUserMult = ValidateBloom(
             settings.bloomUserMult,
             1.0
         )
-
     end
 
     -- In-combat bloom.
@@ -171,13 +241,16 @@ local function InitializeSettings()
         settings.chatMessages = DEFAULTS.chatMessages
     end
 
+    -- Instance suspension.
+    if type(settings.disableInsideInstances) ~= "boolean" then
+        settings.disableInsideInstances =
+            DEFAULTS.disableInsideInstances
+    end
 end
-
 -- Refresh all option controls.
 local function RefreshControls()
 
     if combatDropdown then
-
         UIDropDownMenu_SetSelectedValue(
             combatDropdown,
             pendingInCombat
@@ -187,11 +260,9 @@ local function RefreshControls()
             combatDropdown,
             tostring(pendingInCombat)
         )
-
     end
 
     if outOfCombatDropdown then
-
         UIDropDownMenu_SetSelectedValue(
             outOfCombatDropdown,
             pendingOutOfCombat
@@ -201,11 +272,9 @@ local function RefreshControls()
             outOfCombatDropdown,
             tostring(pendingOutOfCombat)
         )
-
     end
 
     if bloomCombatSlider then
-
         bloomCombatSlider:SetValue(
             pendingBloomInCombat
         )
@@ -213,11 +282,9 @@ local function RefreshControls()
         bloomCombatValue:SetText(
             string.format("%.1f", pendingBloomInCombat)
         )
-
     end
 
     if bloomOutOfCombatSlider then
-
         bloomOutOfCombatSlider:SetValue(
             pendingBloomOutOfCombat
         )
@@ -225,13 +292,17 @@ local function RefreshControls()
         bloomOutOfCombatValue:SetText(
             string.format("%.1f", pendingBloomOutOfCombat)
         )
-
     end
 
     if chatMessagesCheckbox then
         chatMessagesCheckbox:SetChecked(pendingChatMessages)
     end
 
+    if instanceCheckbox then
+        instanceCheckbox:SetChecked(
+            pendingDisableInsideInstances
+        )
+    end
 end
 
 -- Create a weather density dropdown.
@@ -307,7 +378,6 @@ local function CreateDensityDropdown(
             UIDropDownMenu_AddButton(info, level)
 
         end
-
     end)
 
     UIDropDownMenu_SetSelectedValue(
@@ -321,7 +391,6 @@ local function CreateDensityDropdown(
     )
 
     return dropdown
-
 end
 
 -- Create a bloom slider.
@@ -408,7 +477,6 @@ local function CreateBloomSlider(
     end)
 
     return slider, valueText
-
 end
 
 -- Create the standalone options window.
@@ -421,7 +489,7 @@ local function CreateOptionsPanel()
         "BackdropTemplate"
     )
 
-    panel:SetSize(380, 510)
+    panel:SetSize(380, 550)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetClampedToScreen(true)
@@ -542,9 +610,7 @@ local function CreateOptionsPanel()
         -250,
         pendingBloomInCombat,
         function(value)
-
             pendingBloomInCombat = value
-
         end
     )
 
@@ -555,9 +621,7 @@ local function CreateOptionsPanel()
         -330,
         pendingBloomOutOfCombat,
         function(value)
-
             pendingBloomOutOfCombat = value
-
         end
     )
 
@@ -603,6 +667,56 @@ local function CreateOptionsPanel()
 
     end)
 
+    -- Disable CombatWeather inside instances checkbox.
+    instanceCheckbox = CreateFrame(
+        "CheckButton",
+        "CombatWeatherInstanceCheckbox",
+        panel,
+        "UICheckButtonTemplate"
+    )
+
+    instanceCheckbox:SetPoint(
+        "TOPLEFT",
+        panel,
+        "TOPLEFT",
+        18,
+        -445
+    )
+
+    instanceCheckbox:SetChecked(
+        pendingDisableInsideInstances
+    )
+
+    local instanceCheckboxText = instanceCheckbox:CreateFontString(
+        nil,
+        "ARTWORK",
+        "GameFontNormal"
+    )
+
+    instanceCheckboxText:SetPoint(
+        "LEFT",
+        instanceCheckbox,
+        "RIGHT",
+        0,
+        0
+    )
+
+    instanceCheckboxText:SetText(
+        "Disable CombatWeather inside instances"
+    )
+
+    instanceCheckbox:SetScript("OnClick", function(self)
+
+        pendingDisableInsideInstances =
+            self:GetChecked() and true or false
+
+        settings.disableInsideInstances =
+            pendingDisableInsideInstances
+
+        ApplySettings()
+
+    end)
+
     -- Defaults button.
     local defaultsButton = CreateFrame(
         "Button",
@@ -630,14 +744,19 @@ local function CreateOptionsPanel()
 
         pendingBloomInCombat = DEFAULTS.bloomInCombat
 
-        -- Restore the originally saved bloom preference.
         pendingBloomOutOfCombat = settings.bloomUserMult
 
         pendingChatMessages = DEFAULTS.chatMessages
 
+        pendingDisableInsideInstances =
+            DEFAULTS.disableInsideInstances
+
         RefreshControls()
 
         settings.chatMessages = pendingChatMessages
+
+        settings.disableInsideInstances =
+            pendingDisableInsideInstances
 
         PrintMessage(
             "Default values restored. Click Save to apply."
@@ -672,12 +791,12 @@ local function CreateOptionsPanel()
 
         settings.bloomInCombat = pendingBloomInCombat
 
-        -- Save the selected out-of-combat bloom value.
-        -- This also overwrites the previously captured
-        -- bloom preference for future addon sessions.
         settings.bloomUserMult = pendingBloomOutOfCombat
 
         settings.chatMessages = pendingChatMessages
+
+        settings.disableInsideInstances =
+            pendingDisableInsideInstances
 
         PrintMessage("Settings saved.")
 
@@ -697,14 +816,15 @@ local function CreateOptionsPanel()
 
         pendingChatMessages = settings.chatMessages
 
+        pendingDisableInsideInstances =
+            settings.disableInsideInstances
+
         RefreshControls()
 
     end)
 
     panel:Hide()
-
 end
-
 -- Register CombatWeather in WoW Interface Options.
 local function RegisterOptionsCategory()
 
@@ -794,7 +914,6 @@ local function RegisterOptionsCategory()
         Settings.RegisterAddOnCategory(category)
 
     end
-
 end
 
 -- Main event handler.
@@ -804,6 +923,7 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
@@ -829,8 +949,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         ApplySettings()
 
-    end
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
 
+        ApplySettings()
+
+    end
 end)
 
 -- Slash commands.
@@ -843,7 +966,6 @@ SlashCmdList["COMBATWEATHER"] = function()
         PrintMessage("Options are not initialized yet.")
 
         return
-
     end
 
     if panel:IsShown() then
@@ -851,5 +973,4 @@ SlashCmdList["COMBATWEATHER"] = function()
     else
         panel:Show()
     end
-
 end
